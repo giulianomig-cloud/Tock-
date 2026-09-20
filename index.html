@@ -2891,7 +2891,7 @@ function renderPawns(svg, board, pawns, lastSwap, lastCapture) {
 // Bumped by hand each time a new build is produced — shown in the lobby so
 // it's obvious at a glance whether you're on the latest version, instead
 // of guessing from a stale browser tab or cache.
-const APP_VERSION = "v2.0";
+const APP_VERSION = "v2.2";
 
 let myColor = null;
 let myRoomId = null;
@@ -3285,6 +3285,19 @@ async function joinManualRoom(roomId) {
       alert(`Il colore ${colorLabel(myColor)} è già stato scelto da ${existing.name || colorLabel(myColor)} in questa stanza. Scegline un altro, oppure rientra usando esattamente lo stesso nome per riprenderlo.`);
       return;
     }
+    // Due colori diversi con lo stesso nome mandano in confusione il
+    // rientro-per-nome più avanti (non saprebbe a quale colore restituire
+    // il posto), quindi lo blocchiamo già qui.
+    const otherPlayers = snap.val().players || {};
+    const nameTakenElsewhere = COLORS.some((c) => {
+      if (c === myColor) return false;
+      const p = otherPlayers[c];
+      return p && p.name && myName && p.name.trim().toLowerCase() === myName.trim().toLowerCase();
+    });
+    if (nameTakenElsewhere) {
+      alert(`Il nome "${myName}" è già usato da un altro giocatore in questa stanza. Scegline uno diverso (es. aggiungi un'iniziale).`);
+      return;
+    }
     await ref.child("players").child(myColor).set({ name: myName, token: claimToken });
   }
 
@@ -3388,6 +3401,15 @@ async function joinDraftRoom(roomId) {
         if (!state.draft.players[myToken] && Object.keys(state.draft.players).length >= 4) {
           throw new Error("la stanza è già piena (4 giocatori)");
         }
+        // Due giocatori con lo stesso nome mandano in confusione il
+        // rientro-per-nome più avanti (non saprebbe a chi dei due
+        // restituire il posto), quindi lo blocchiamo già qui.
+        const nameTaken = Object.entries(state.draft.players).some(
+          ([tok, n]) => tok !== myToken && n && n.trim().toLowerCase() === myName.trim().toLowerCase()
+        );
+        if (nameTaken) {
+          throw new Error(`"${myName}" è già stato usato da un altro giocatore in questa stanza. Scegli un nome diverso (es. aggiungi un'iniziale).`);
+        }
         if (!state.draft.players[myToken]) state.draft.order.push(myToken);
         state.draft.players[myToken] = myName;
       });
@@ -3460,7 +3482,7 @@ function renderDraftScreen(state) {
   if (joined < 4 || !d.pairDraw) return renderDraftWaiting(state);
   if (!d.pairChoice) return renderPairDrawScreen(state);
   if (!d.colorPicks[myToken]) return renderSoloColorChoice(state);
-  return renderDraftFinalizing();
+  return renderDraftFinalizing(state);
 }
 
 function renderDraftWaiting(state) {
@@ -3664,15 +3686,26 @@ async function pickSoloColor(color) {
   }
 }
 
-function renderDraftFinalizing() {
+function renderDraftFinalizing(state) {
   const root = $("#app");
   root.innerHTML = "";
+  // Mostra chi manca ancora, invece di un generico "in corso": se qualcuno
+  // ha chiuso la pagina a metà (es. un test con una scheda abbandonata), qui
+  // si vede subito chi è bloccato, invece di restare senza informazioni.
+  const d = state.draft;
+  const doneTokens = Object.keys(d.colorPicks);
+  const waitingNames = d.order
+    .filter((t) => d.players[t] && !doneTokens.includes(t))
+    .map((t) => d.players[t]);
   root.appendChild(
     el(
       "div",
       { class: "lobby-card" },
       el("h1", {}, "Tock"),
-      el("p", { class: "muted" }, "Tutti pronti! Avvio in corso...")
+      el("p", { class: "muted" }, "Tu sei pronto! Avvio in corso..."),
+      waitingNames.length > 0
+        ? el("p", { class: "muted" }, `In attesa che scelga il colore: ${waitingNames.join(", ")}.`)
+        : el("p", { class: "muted" }, "Anche gli altri sono pronti, avvio imminente...")
     )
   );
 }
