@@ -44,6 +44,14 @@ body {
 #app { max-width: 480px; margin: 0 auto; padding: calc(12px + env(safe-area-inset-top)) 12px 12px; min-height: 100vh; }
 
 h1 { font-size: 1.4rem; margin: 0 0 4px; color: var(--ink); }
+.app-logo { display: flex; flex-direction: column; align-items: center; margin-bottom: 16px; }
+.app-logo h1 { text-align: center; font-size: 2rem; margin: 0; }
+.app-logo-dots { display: flex; justify-content: space-between; margin-bottom: -4px; }
+.app-logo-dots span { border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.25); aspect-ratio: 1 / 1; }
+.app-logo-dots .ld-red { background: var(--red); }
+.app-logo-dots .ld-green { background: var(--green); }
+.app-logo-dots .ld-yellow { background: var(--yellow); }
+.app-logo-dots .ld-blue { background: var(--blue); }
 .sound-test-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .app-meta { font-size: 0.65rem; color: #a89873; letter-spacing: 0.02em; opacity: 0.8; margin: 0; }
 .muted { color: #7a6a55; font-size: 0.9rem; }
@@ -2891,7 +2899,7 @@ function renderPawns(svg, board, pawns, lastSwap, lastCapture) {
 // Bumped by hand each time a new build is produced — shown in the lobby so
 // it's obvious at a glance whether you're on the latest version, instead
 // of guessing from a stale browser tab or cache.
-const APP_VERSION = "v2.5";
+const APP_VERSION = "v2.6";
 
 let myColor = null;
 let myRoomId = null;
@@ -2955,7 +2963,13 @@ function renderLobby() {
     el(
       "div",
       { class: "lobby-card" },
-      el("h1", {}, "Tock"),
+      el("div", { class: "app-logo" },
+        el("div", { class: "app-logo-dots" },
+          el("span", { class: "ld-red" }), el("span", { class: "ld-green" }),
+          el("span", { class: "ld-yellow" }), el("span", { class: "ld-blue" })
+        ),
+        el("h1", {}, "Tock")
+      ),
       el("p", { class: "muted" }, "Inserisci il codice stanza per creare o entrare in una partita."),
       roomInput,
       el("button", { id: "continue-btn", class: "primary", onclick: continueFromRoomCode }, "Continua"),
@@ -2968,6 +2982,22 @@ function renderLobby() {
       homeScreenHint()
     )
   );
+
+  sizeLogoDotsToTitle();
+}
+
+function sizeLogoDotsToTitle() {
+  const dotsRow = document.querySelector(".app-logo-dots");
+  const title = document.querySelector(".app-logo h1");
+  if (!dotsRow || !title) return;
+  const w = title.offsetWidth;
+  dotsRow.style.width = w + "px";
+  // 4 pallini + 3 spazi (space-between) larghi quanto la scritta "Tock".
+  const d = Math.round(w / 5.2);
+  dotsRow.querySelectorAll("span").forEach((s) => {
+    s.style.width = d + "px";
+    s.style.height = d + "px";
+  });
 }
 
 async function continueFromRoomCode() {
