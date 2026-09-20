@@ -2891,7 +2891,7 @@ function renderPawns(svg, board, pawns, lastSwap, lastCapture) {
 // Bumped by hand each time a new build is produced — shown in the lobby so
 // it's obvious at a glance whether you're on the latest version, instead
 // of guessing from a stale browser tab or cache.
-const APP_VERSION = "v2.2";
+const APP_VERSION = "v2.5";
 
 let myColor = null;
 let myRoomId = null;
@@ -2902,6 +2902,13 @@ let currentState = null;
 let sevenAllocation = null; // {pawnIndex: steps} while the 7-splitter is open
 let jackPicked = []; // selected {color,pawnIndex} while the Jack picker is open
 let draftAnimShown = { pairDraw: false }; // evita di rifare l'animazione ad ogni re-render
+// Ogni chiamata a renderPairDrawScreen incrementa questo contatore. Serve a
+// invalidare un'animazione "vecchia" rimasta in esecuzione in background
+// (es. perché nel frattempo è arrivato un altro aggiornamento dalla stanza e
+// lo schermo è stato ridisegnato): senza questo controllo, i suoi timer
+// ritardati potrebbero scrivere per un attimo un nome casuale dello spin
+// sopra ai riquadri già assestati con il nome vero.
+let draftPairRenderToken = 0;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -3166,21 +3173,6 @@ function renderManualLobby(roomId, existingPlayers) {
       el("p", { class: "muted" }, `Stanza ${roomId} — inserisci il tuo nome e scegli il tuo colore.`),
       nameInput,
       colorRow,
-      el(
-        "div",
-        { class: "teams-hint" },
-        el(
-          "div",
-          { class: "team-pill" },
-          swatchDot("red"), "Rosso", el("span", { class: "team-plus" }, "+"), swatchDot("yellow"), "Giallo"
-        ),
-        el("span", { class: "vs-label" }, "vs"),
-        el(
-          "div",
-          { class: "team-pill" },
-          swatchDot("green"), "Verde", el("span", { class: "team-plus" }, "+"), swatchDot("blue"), "Blu"
-        )
-      ),
       el("button", { id: "join-btn", class: "primary", onclick: () => joinManualRoom(roomId) }, "Entra nella stanza"),
       el(
         "div",
@@ -3513,6 +3505,7 @@ function renderDraftWaiting(state) {
 }
 
 function renderPairDrawScreen(state) {
+  const renderToken = ++draftPairRenderToken;
   const root = $("#app");
   root.innerHTML = "";
   const [pairA, pairB] = state.draft.pairDraw.pairs;
@@ -3550,7 +3543,13 @@ function renderPairDrawScreen(state) {
     renderPairChoiceButtons(state);
   } else {
     draftAnimShown.pairDraw = true;
-    animateDraftSlots(pairA, pairB, nameOf).then(() => renderPairChoiceButtons(state));
+    animateDraftSlots(pairA, pairB, nameOf, renderToken).then(() => {
+      // Nel frattempo potrebbe essere arrivato un altro aggiornamento e lo
+      // schermo essere stato ridisegnato: in quel caso questa animazione è
+      // superata, non tocchiamo più nulla (l'ha già fatto il render nuovo).
+      if (renderToken !== draftPairRenderToken) return;
+      renderPairChoiceButtons(state);
+    });
   }
 }
 
@@ -3569,20 +3568,24 @@ function showDraftSlotsInstant(pairA, pairB, nameOf) {
   if (tb) tb.classList.add("ready");
 }
 
-async function animateDraftSlots(pairA, pairB, nameOf) {
+async function animateDraftSlots(pairA, pairB, nameOf, renderToken) {
   const pool = [nameOf(pairA[0]), nameOf(pairA[1]), nameOf(pairB[0]), nameOf(pairB[1])];
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const stale = () => renderToken !== draftPairRenderToken;
   const spin = async (id, finalText, staggerMs) => {
     await sleep(staggerMs);
+    if (stale()) return;
     const slotEl = document.getElementById(id);
     if (!slotEl) return;
     const span = slotEl.querySelector("span");
     slotEl.classList.add("spinning");
     const start = Date.now();
     while (Date.now() - start < 650) {
+      if (stale()) return;
       span.textContent = pool[Math.floor(Math.random() * pool.length)];
       await sleep(55);
     }
+    if (stale()) return;
     span.textContent = finalText;
     slotEl.classList.remove("spinning");
   };
@@ -3592,6 +3595,7 @@ async function animateDraftSlots(pairA, pairB, nameOf) {
     spin("draft-slot-b1", nameOf(pairB[0]), 400),
     spin("draft-slot-b2", nameOf(pairB[1]), 600),
   ]);
+  if (stale()) return;
   const ta = document.getElementById("draft-team-a");
   const tb = document.getElementById("draft-team-b");
   if (ta) ta.classList.add("ready");
@@ -3679,7 +3683,21 @@ async function pickSoloColor(color) {
     await updateState(myRoomId, (state) => {
       if (state.draft.colorPicks[myToken]) return; // già scelto
       if (Object.values(state.draft.colorPicks).includes(color)) throw new Error("colore già preso dal tuo compagno");
+      const [pairA, pairB] = state.draft.pairDraw.pairs;
+      const myPair = pairA.includes(myToken) ? pairA : pairB;
+      const partnerToken = myPair.find((t) => t !== myToken);
+      const myPairIndex = pairA.includes(myToken) ? 0 : 1;
+      const { pickIndex, pick } = state.draft.pairChoice;
+      const myPick = myPairIndex === pickIndex ? pick : (pick === "RY" ? "GB" : "RY");
+      const options = myPick === "RY" ? ["red", "yellow"] : ["green", "blue"];
+      const otherColor = options.find((c) => c !== color);
       state.draft.colorPicks[myToken] = color;
+      // Al compagno di squadra resta un solo colore possibile (quello che
+      // non hai preso tu): glielo assegniamo subito in automatico, così non
+      // deve cliccare anche lui/lei per confermarlo.
+      if (partnerToken && !state.draft.colorPicks[partnerToken]) {
+        state.draft.colorPicks[partnerToken] = otherColor;
+      }
     });
   } catch (e) {
     alert(e.message);
